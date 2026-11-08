@@ -1,0 +1,121 @@
+<!DOCTYPE html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Техаський Холдем</title>
+<style>
+:root{--bg:#0f1512;--tx:#eef3ee;--mu:#9fb0a5;--felt:#16704a;--felt2:#0b3d28;--ac:#f2b632;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;padding:8px}
+h1{font-size:18px;margin:4px 8px}
+.wrap{max-width:920px;margin:0 auto}
+.tbl{position:relative;height:min(66vh,540px);min-height:400px;margin:22px 26px;background:radial-gradient(ellipse at center,var(--felt),var(--felt2));border:8px solid #3b2a1a;border-radius:50%/46%;box-shadow:inset 0 0 40px #0008}
+.mid{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);text-align:center}
+.pot{font-weight:700;color:var(--ac);margin-bottom:6px}
+.board{display:flex;gap:5px;justify-content:center;min-height:46px}
+.c{width:32px;height:45px;background:#fff;color:#111;border-radius:5px;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;font-size:14px;line-height:1.05;box-shadow:0 1px 3px #0009}
+.c small{font-size:13px}.c.r{color:#c62828}
+.c.b{background:repeating-linear-gradient(45deg,#2a4d9b 0 4px,#1e3a78 4px 8px)}
+.seat{position:absolute;transform:translate(-50%,-50%);width:98px;text-align:center;background:#000a;border:2px solid #ffffff22;border-radius:10px;padding:4px 2px;font-size:12px}
+.seat.turn{border-color:var(--ac)}.seat.fold{opacity:.45}.seat.win{border-color:#4cd964;box-shadow:0 0 14px #4cd964}
+.seat .cs{display:flex;gap:3px;justify-content:center;margin:3px 0}
+.seat .c{width:26px;height:36px;font-size:12px}
+.nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d{background:var(--ac);color:#000;border-radius:50%;padding:0 5px;margin-left:4px;font-size:11px}
+.st{color:var(--mu);min-height:16px}
+.me{width:120px}
+#info{text-align:center;color:var(--mu);min-height:20px}
+#ct{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center;padding:8px}
+button{background:#25362d;color:var(--tx);border:1px solid #ffffff30;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer}
+button.p{background:var(--ac);color:#111;font-weight:700}button:hover{filter:brightness(1.15)}
+#rg{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:center}
+#rs{width:150px}
+#log{height:130px;overflow:auto;background:#0b100d;border:1px solid #ffffff18;border-radius:8px;padding:6px 10px;font-size:12px;color:var(--mu)}
+#log .h{color:var(--ac);margin-top:4px}#log .w{color:#4cd964}
+.ov{position:fixed;inset:0;background:#000c;display:flex;align-items:center;justify-content:center;z-index:5;padding:16px}
+.ov>div{background:#18211c;border-radius:14px;padding:22px;max-width:360px;width:100%;display:grid;gap:12px}
+.ov label{display:grid;gap:4px;color:var(--mu)}
+.ov input,.ov select{background:#0f1512;color:var(--tx);border:1px solid #ffffff30;border-radius:8px;padding:9px;font-size:15px}
+[hidden]{display:none!important}
+@media(max-width:560px){.tbl{margin:20px 10px;min-height:440px}.seat{width:80px;font-size:11px}.seat .c{width:22px;height:31px;font-size:11px}.c{width:27px;height:38px}}
+
+.card{max-width:420px;margin:24px auto;background:#18211c;border-radius:14px;padding:20px;display:grid;gap:12px}
+.card h2{margin:0}.card label{display:grid;gap:4px;color:var(--mu)}
+.card input,.card select{background:#0f1512;color:var(--tx);border:1px solid #ffffff30;border-radius:8px;padding:9px;font-size:15px}
+.row{display:flex;gap:8px}.row>*{flex:1}.tb{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #ffffff14}
+.err{color:#ff7a7a;min-height:18px}#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#000c;padding:8px 14px;border-radius:8px}
+#code{font-size:30px;letter-spacing:6px;color:var(--ac);font-weight:700;text-align:center}
+#conn{background:#7a2b2b;text-align:center;padding:4px;border-radius:6px}</style></head><body><div class="wrap">
+<h1>♠ Техаський Холдем <span id="who" style="color:var(--mu);font-weight:400;font-size:13px"></span></h1>
+<div id="conn" hidden>Зʼєднання втрачено, перепідключення…</div>
+<section id="auth" class="card"><h2>Вхід</h2>
+<label>Імʼя користувача<input id="un" maxlength="16" autocomplete="username"></label>
+<label>Пароль<input id="pw" type="password" autocomplete="current-password"></label>
+<div class="row"><button class="p" onclick="auth('login')">Увійти</button><button onclick="auth('register')">Реєстрація</button></div><div class="err" id="ae"></div></section>
+<section id="menu" class="card" hidden><h2>Мультиплеєр</h2>
+<div class="row"><label>Ботів<select id="nb"></select></label><label>Стек<select id="stk"><option>500</option><option selected>1000</option><option>2000</option></select></label></div>
+<div class="row"><button class="p" onclick="mk(0)">Створити стіл</button><button onclick="mk(1)">Гра проти ботів</button></div>
+<label>Приєднатись за кодом<div class="row"><input id="jc" maxlength="6" placeholder="КОД" style="text-transform:uppercase"><button class="p" onclick="send({t:'join',code:$('jc').value})">Увійти</button></div></label>
+<div class="tb"><b>Відкриті столи</b><button onclick="refresh()">Оновити</button></div><div id="tl"></div>
+<button onclick="logout()">Вийти з акаунта</button></section>
+<section id="lob" class="card" hidden><h2>Очікування гравців</h2><div style="color:var(--mu)">Код столу — повідомте друзям:</div><div id="code"></div><div id="pl"></div>
+<button class="p" id="st" onclick="send({t:'start'})">Почати гру</button><div id="wt" style="color:var(--mu)">Чекаємо, поки хост почне гру…</div><button onclick="send({t:'leave'})">Вийти зі столу</button></section>
+<section id="game" hidden><div class="tbl" id="T"><div class="mid"><div class="pot" id="pot"></div><div class="board" id="bd"></div></div></div>
+<div id="info"></div>
+<div id="ct" hidden><button id="bF">Фолд</button><button id="bC" class="p">Чек</button>
+<div id="rg"><button id="q1">½ пота</button><button id="q2">Пот</button><input type="range" id="rs"><button id="bR" class="p"></button></div></div>
+<div id="log"></div><div style="text-align:center;padding:8px"><button onclick="send({t:'leave'})">Вийти зі столу</button></div></section></div>
+<div id="toast"></div>
+<div class="ov" id="end" hidden><div><h2 id="et" style="margin:0"></h2><button class="p" onclick="$('end').hidden=true;send({t:'leave'})">До меню</button></div></div>
+<script>
+const $=id=>document.getElementById(id),R={11:'J',12:'Q',13:'K',14:'A'},SU='♠♥♦♣';
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let tok=localStorage.getItem('pk_tok'),ws=null,ME='',shown=-1,retry=0;
+for(let i=0;i<=8;i++)$('nb').add(new Option(String(i),i,i===2,i===2));
+const show=id=>['auth','menu','lob','game'].forEach(x=>$(x).hidden=x!==id);
+const send=o=>ws&&ws.readyState===1&&ws.send(JSON.stringify(o));
+const toast=t=>{$('toast').textContent=t;setTimeout(()=>{if($('toast').textContent===t)$('toast').textContent=''},4000)};
+const mk=solo=>send({t:'create',bots:+$('nb').value,stack:+$('stk').value,solo});
+async function api(p,b){const r=await fetch('/api/'+p,{method:b?'POST':'GET',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
+ const j=await r.json();if(!r.ok)throw j.detail||'Помилка';return j}
+async function auth(k){try{const j=await api(k,{name:$('un').value.trim(),password:$('pw').value});tok=j.token;localStorage.setItem('pk_tok',tok);$('ae').textContent='';connect()}catch(e){$('ae').textContent=e}}
+function logout(){tok=null;localStorage.removeItem('pk_tok');if(ws)ws.close();show('auth')}
+async function refresh(){try{const l=await api('tables');$('tl').innerHTML=l.length?l.map(t=>`<div class="tb"><span>${t.code} · ${esc(t.host)} · ${t.n} гр.${t.bots?' + '+t.bots+' ботів':''}</span><button onclick="send({t:'join',code:'${t.code}'})">Увійти</button></div>`).join(''):'<div style="color:var(--mu)">Відкритих столів немає</div>'}catch(e){}}
+function connect(){
+ if(!tok)return show('auth');
+ ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+ ws.onopen=()=>{send({t:'auth',token:tok});retry=0};
+ ws.onmessage=e=>on(JSON.parse(e.data));
+ ws.onclose=()=>{if(tok){$('conn').hidden=false;setTimeout(connect,Math.min(1000*++retry,5000))}}}
+setInterval(()=>send({t:'ping'}),25000);
+function on(m){switch(m.t){
+ case'authok':ME=m.name;$('who').textContent='· '+ME;$('conn').hidden=true;show('menu');refresh();break;
+ case'autherr':logout();break;
+ case'lobby':show('lob');$('code').textContent=m.code;
+  $('pl').innerHTML=m.players.map(n=>`<div class="tb">${esc(n)}${n===m.host?' 👑':''}</div>`).join('')+(m.bots?`<div class="tb">+ ${m.bots} ботів</div>`:'');
+  $('st').hidden=m.host!==ME;$('wt').hidden=m.host===ME;break;
+ case'state':show('game');draw(m);break;
+ case'log':addLog(m.m,m.c);break;
+ case'end':$('et').textContent=m.m;$('end').hidden=false;break;
+ case'left':$('log').innerHTML='';show('menu');refresh();break;
+ case'err':toast(m.m)}}
+function addLog(t,c){const d=document.createElement('div');d.textContent=t;if(c)d.className=c;$('log').appendChild(d);$('log').scrollTop=1e9}
+const ch=c=>c?`<span class="c ${c.s==1||c.s==2?'r':''}">${R[c.r]||c.r}<small>${SU[c.s]}</small></span>`:'<span class="c b"></span>';
+function draw(S){
+ const n=S.pl.length,mr=Math.max(0,S.pl.findIndex(p=>p.me)),T=$('T');
+ T.querySelectorAll('.seat').forEach(e=>e.remove());
+ S.pl.forEach((p,i)=>{const k=(i-mr+n)%n,a=Math.PI/2+2*Math.PI*k/n,d=document.createElement('div');
+  d.className='seat'+(p.me?' me':'')+(p.f?' fold':'')+(i===S.turn?' turn':'')+(p.w?' win':'');
+  d.style.cssText=`left:${50+44*Math.cos(a)}%;top:${50+42*Math.sin(a)}%`;
+  d.innerHTML=`<div class="nm">${esc(p.n)}${i===S.btn?'<b class="d">D</b>':''}</div><div class="cs">${p.h.map(ch).join('')}</div><div>💰 ${p.c}</div><div class="st">${esc(p.l||'')}${p.b?' · '+p.b:''}</div>`;
+  T.appendChild(d)});
+ $('pot').textContent=S.pot?'Банк: '+S.pot:'';$('bd').innerHTML=S.bd.map(ch).join('');
+ $('info').textContent=S.act?'⏱ Ваш хід (45 с)':S.wait&&S.turn>=0?'Ходить '+S.pl[S.turn].n:S.combo?'Ваша комбінація: '+S.combo:'';
+ if(S.act){if(S.tk!==shown)ctl(S)}else{shown=-1;$('ct').hidden=true}}
+function ctl(S){shown=S.tk;const a=S.act,t=S.tk;
+ $('ct').hidden=false;$('bC').textContent=a.tc?(a.tc===S.pl[S.turn].c?'Колл (олл-ін) ':'Колл ')+a.tc:'Чек';
+ $('rg').hidden=!a.r;const rs=$('rs');rs.min=a.mn;rs.max=a.mx;rs.step=1;rs.value=a.mn;
+ const upd=()=>$('bR').textContent=(+rs.value>=a.mx?'Олл-ін ':a.cur?'Рейз до ':'Бет ')+rs.value;upd();rs.oninput=upd;
+ const set=v=>{rs.value=Math.max(a.mn,Math.min(a.mx,v));upd()};
+ $('q1').onclick=()=>set(a.cur+Math.round((a.pt+a.tc)/2));$('q2').onclick=()=>set(a.cur+a.pt+a.tc);
+ const go=o=>{$('ct').hidden=true;send({t:'act',tk:t,...o})};
+ $('bF').onclick=()=>go({a:'f'});$('bC').onclick=()=>go({a:'c'});$('bR').onclick=()=>go({a:'r',to:+rs.value})}
+$('pw').onkeydown=e=>{if(e.key==='Enter')auth('login')};
+connect();
+</script></body></html>
