@@ -1,10 +1,11 @@
 """Сервер: акаунти (SQLite), WebSocket-столи, роздача статичного фронтенду."""
-import asyncio, hashlib, os, random, re, secrets, sqlite3, string, time
+import asyncio, hashlib, json, os, random, re, secrets, sqlite3, string, time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from engine import Table
+import blackjack as bjm
 
 DB = os.environ.get('POKER_DB', 'poker.db')
 TABLES: dict = {}; SEAT: dict = {}   # код -> стіл; імʼя -> стіл, за яким сидить гравець
@@ -27,10 +28,37 @@ async def sweeper():
         for t in list(TABLES.values()):
             if t.over or (t.idle and time.time() - t.idle > 300): drop(t)
 
+# ---------- Blackjack: одна гра на користувача, стан зберігається в БД ----------
+BJ: dict = {}
+def bj_game(name):
+    g = BJ.get(name)
+    if g is None:
+        r = q('select data from bj where name=?', name)
+        g = BJ[name] = bjm.Blackjack.from_dict(json.loads(r[0][0])) if r else bjm.Blackjack()
+    return g
+def bj_events(ev):
+    out = []
+    for e in ev:
+        e = dict(e)
+        if 'card' in e: e['card'] = None if e.get('hole') else {'r': e['card'][0], 's': e['card'][1]}   # закриту карту не розкриваємо
+        out.append(e)
+    return out
+async def bj_msg(ws, name, m):
+    g = bj_game(name); k = m.get('t'); ev = []
+    try:
+        if k == 'bj_deal': ev = g.deal(m.get('bet'))
+        elif k == 'bj_act' and m.get('a') in ('hit', 'stand', 'double', 'split'): ev = getattr(g, m['a'])()
+        elif k == 'bj_new': g.new_game()
+    except bjm.RuleError as e:
+        await ws.send_json({'t': 'err', 'm': str(e)})
+    q('insert or replace into bj values(?,?)', name, json.dumps(g.to_dict()))
+    await ws.send_json({'t': 'bj', 'view': g.view(), 'events': bj_events(ev), 'rules': bjm.RULES_TEXT, 'init': k == 'bj_state'})
+
 @asynccontextmanager
 async def lifespan(app):
     q('create table if not exists users(name text primary key, salt blob, hash blob)')
     q('create table if not exists sessions(token text primary key, name text)')
+    q('create table if not exists bj(name text primary key, data text)')
     task = asyncio.create_task(sweeper()); yield; task.cancel()
 
 app = FastAPI(lifespan=lifespan)
@@ -71,6 +99,7 @@ async def ws_ep(ws: WebSocket):
         if SEAT.get(name): await SEAT[name].attach(name, ws)
         while True:
             m = await ws.receive_json(); k = m.get('t'); t = SEAT.get(name)
+            if str(k).startswith('bj_'): await bj_msg(ws, name, m); continue
             if k == 'create' and not t:
                 code = next(c for c in iter(lambda: ''.join(random.choices(string.ascii_uppercase + string.digits, k=4)), None) if c not in TABLES)
                 bots = max(0, min(8, int(m.get('bots') or 0))); stack = m.get('stack') if m.get('stack') in (500, 1000, 2000) else 1000

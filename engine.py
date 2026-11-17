@@ -1,33 +1,16 @@
 """Рушій техаського холдему: стіл, раунди торгів, сайд-поти, боти. Усе рахує сервер."""
-import asyncio, itertools, random, time
+import asyncio, os, random, time
 from types import SimpleNamespace as NS
+import bots
+from cards import best, best_cards, hand_name, new_deck, card_str
 
-SPEED = 1.0  # множник пауз (у тестах 0)
-HN = ['Старша карта','Пара','Дві пари','Трійка','Стріт','Флеш','Фул-хаус','Каре','Стріт-флеш']
+SPEED = float(os.environ.get('POKER_SPEED', '1'))  # множник пауз (у тестах 0)
 BOTS = ['Олег','Марта','Іван','Софія','Тарас','Надія','Богдан','Ліна']
 def sleep(x): return asyncio.sleep(x * SPEED)
 
-def ev5(c):
-    r = sorted((x[0] for x in c), reverse=True); fl = len({x[1] for x in c}) == 1; st = 0
-    if len(set(r)) == 5:
-        if r[0] - r[4] == 4: st = r[0]
-        elif r[:2] == [14, 5]: st = 5
-    g = sorted(((r.count(k), k) for k in set(r)), reverse=True); k = [x[1] for x in g]
-    if st and fl: return (8, st)
-    if g[0][0] == 4: return (7, *k)
-    if g[0][0] == 3 and g[1][0] == 2: return (6, *k)
-    if fl: return (5, *r)
-    if st: return (4, st)
-    if g[0][0] == 3: return (3, *k)
-    if g[0][0] == 2 and g[1][0] == 2: return (2, *k)
-    if g[0][0] == 2: return (1, *k)
-    return (0, *r)
-
-def best(cards): return max(ev5(c) for c in itertools.combinations(cards, 5))
-
 def player(name, user=None, ws=None):
     return NS(name=name, user=user, ws=ws, chips=0, hand=[], bet=0, total=0, folded=False, allin=False,
-              acted=False, inn=False, last='', show=False, win=False, agg=random.uniform(.5, 2), ev=None)
+              acted=False, inn=False, last='', show=False, win=False, b5=None, locked=False, style=random.choice(list(bots.STYLES)), ev=None)
 
 class Table:
     def __init__(s, code, host, stack, nbots):
@@ -55,13 +38,14 @@ class Table:
         a = s.pend[0] if s.pend else None; act = None
         if a is me:
             tc = min(s.cur - a.bet, a.chips); mx = a.bet + a.chips
-            act = {'tc': tc, 'mn': min(s.cur + s.minr, mx), 'mx': mx, 'r': a.chips > tc, 'pt': s.pot(), 'cur': s.cur}
+            act = {'tc': tc, 'mn': min(s.cur + s.minr, mx), 'mx': mx, 'r': a.chips > tc and not a.locked, 'pt': s.pot(), 'cur': s.cur}
         card = lambda c: {'r': c[0], 's': c[1]}
-        pl = [{'n': p.name, 'c': p.chips, 'b': p.bet, 'f': p.folded, 'w': p.win, 'me': p is me,
+        pl = [{'n': p.name, 'c': p.chips, 'b': p.bet, 'f': p.folded, 'w': p.win, 'me': p is me, 'sty': None if p.user else p.style,
+               'b5': [card(c) for c in p.b5] if p.win and p.show and p.b5 else None,
                'l': 'Вибув' if p.chips == 0 and not p.total else p.last,
                'h': [card(c) if (p is me or (p.show and not p.folded)) else None for c in p.hand]} for p in s.P]
-        combo = HN[best(me.hand + s.board)[0]] if me.hand and len(s.board) >= 3 and not me.folded else ''
-        return {'t': 'state', 'tk': s.tk, 'turn': s.turn, 'btn': s.btn, 'pot': s.pot(), 'wait': bool(a),
+        combo = hand_name(best(me.hand + s.board)) if me.hand and len(s.board) >= 3 and not me.folded else ''
+        return {'t': 'state', 'hno': s.hno, 'tk': s.tk, 'turn': s.turn, 'btn': s.btn, 'pot': s.pot(), 'wait': bool(a),
                 'bd': [card(c) for c in s.board], 'act': act, 'pl': pl, 'combo': combo}
     async def join(s, name, ws):
         s.P.append(player(name, name, ws)); await s.cast(s.lobby())
@@ -93,24 +77,12 @@ class Table:
         for p in s.P: p.chips = s.stack
         s.started = True; s.task = asyncio.create_task(s.run())
 
-    # ---------- боти ----------
-    def strength(s, p):
-        if not s.board:
-            a, b = sorted((c[0] for c in p.hand), reverse=True)
-            v = .5 + a / 28 if a == b else (a + b) / 40 + (.05 if a > 10 else 0)
-            if p.hand[0][1] == p.hand[1][1]: v += .06
-            if a != b and a - b <= 2: v += .04
-            return min(v, 1)
-        e = best(p.hand + s.board); k = e[0]
-        if k == 1: return .4 + .1 * (e[1] - 2) / 12 if any(c[0] == e[1] for c in p.hand) else .25
-        return [.15, 0, .65, .75, .85, .88, .95, .99, 1][k]
-    def bot(s, p):
-        v = s.strength(p) + random.uniform(-.08, .08); tc = s.cur - p.bet; pt = s.pot(); odds = tc / ((pt + tc) or 1)
-        if s.rc < 4 and p.chips > tc and (v > .72 or (random.random() < .05 * p.agg and v > .3)):
-            size = max(s.minr, round(pt * random.uniform(.4, .9) / s.BB) * s.BB); return {'t': 'r', 'to': s.cur + size}
-        if tc == 0: return {'t': 'c'}
-        if v > odds + .12 or (v > .45 and tc <= s.BB * 2): return {'t': 'c'}
-        return {'t': 'f'}
+    # ---------- боти (логіка у bots.py) ----------
+    def bot_view(s, p):
+        return dict(hand=p.hand, board=s.board, pot=s.pot(), to_call=min(s.cur - p.bet, p.chips), chips=p.chips, cur=s.cur,
+                    min_raise_to=s.cur + s.minr, big_blind=s.BB, opponents=sum(q is not p and not q.folded for q in s.P),
+                    raises=s.rc, can_raise=not p.locked)
+    def bot(s, p): return bots.decide(p.style, s.bot_view(p))
 
     # ---------- хід гри ----------
     def pay(s, p, a):
@@ -131,12 +103,18 @@ class Table:
         else:
             await s.sync(); await sleep(random.uniform(.6, 1.2)); d = s.bot(p)
         t = d['t']
+        if t == 'r' and p.locked: t = 'c'      # неповний рейз іншого гравця не відкриває торги для тих, хто вже ходив
         if t == 'r':
             mx = p.bet + p.chips; to = min(max(d.get('to', 0), s.cur + s.minr), mx)
             if to > s.cur:
-                first = s.cur == 0; s.minr = max(s.minr, to - s.cur); s.cur = to; s.rc += 1
-                for q in s.P: q.acted = False
-                s.pay(p, to - p.bet)
+                first = s.cur == 0; full = to - s.cur >= s.minr
+                if full:
+                    s.minr = to - s.cur
+                    for q in s.P: q.acted = q.locked = False
+                else:
+                    for q in s.P:
+                        if q.acted and not q.folded and not q.allin: q.locked = True
+                s.cur = to; s.rc += 1; s.pay(p, to - p.bet)
                 p.last = ('Олл-ін ' if p.allin else 'Бет ' if first else 'Рейз ') + str(to); await s.log(f'{p.name} — {p.last}')
             else: t = 'c'
         if t == 'f': p.folded = True; p.last = 'Фолд'; await s.log(f'{p.name} фолдить')
@@ -153,14 +131,14 @@ class Table:
             await s.act(p)
     def reset(s):
         s.cur, s.minr, s.rc = 0, s.BB, 0
-        for p in s.P: p.bet = 0; p.acted = False; p.last = 'Фолд' if p.folded else 'Олл-ін' if p.allin else ''
+        for p in s.P: p.bet = 0; p.acted = p.locked = False; p.last = 'Фолд' if p.folded else 'Олл-ін' if p.allin else ''
     async def hand(s):
         s.hno += 1
         if s.hno > 1 and (s.hno - 1) % 10 == 0: s.SB *= 2; s.BB *= 2; await s.log(f'Блайнди зросли: {s.SB}/{s.BB}', 'h')
         for p in s.P:
             p.inn = p.chips > 0; p.folded = not p.inn; p.allin = False; p.bet = p.total = 0
-            p.acted = False; p.hand = []; p.show = False; p.win = False; p.last = ''
-        s.board = []; deck = [(r, u) for r in range(2, 15) for u in range(4)]; random.shuffle(deck)
+            p.acted = p.locked = False; p.hand = []; p.show = False; p.win = False; p.last = ''; p.b5 = None
+        s.board = []; deck = new_deck()
         s.btn = s.nxt(s.btn); hu = sum(p.inn for p in s.P) == 2
         sb = s.btn if hu else s.nxt(s.btn); bb = s.nxt(sb); pre = sb if hu else s.nxt(bb); post = bb if hu else s.nxt(s.btn)
         await s.log(f'── Роздача #{s.hno} · Дилер: {s.P[s.btn].name} ──', 'h')
@@ -176,27 +154,34 @@ class Table:
         for nm, n in (('Флоп', 3), ('Тьорн', 1), ('Рівер', 1)):
             if sum(not p.folded for p in s.P) < 2: break
             s.reset(); deck.pop(); new = [deck.pop() for _ in range(n)]; s.board += new
-            await s.log('🃏 Дилер: ' + nm + ' — ' + ' '.join({11: 'J', 12: 'Q', 13: 'K', 14: 'A'}.get(c[0], str(c[0])) + '♠♥♦♣'[c[1]] for c in new))
+            await s.log('🃏 Дилер: ' + nm + ' — ' + ' '.join(map(card_str, new)))
             await s.sync()
             if sum(not p.folded and not p.allin for p in s.P) >= 2: await s.betround(post)
             else: await sleep(.9)
         await s.payout()
     async def payout(s):
-        al = [p for p in s.P if not p.folded]; multi = len(al) > 1; won = {}
+        al = [p for p in s.P if not p.folded]; multi = len(al) > 1; won = {}; back = {}; n = len(s.P); prev = 0
         if multi:
-            for p in al: p.show = True; p.ev = best(p.hand + s.board)
             await s.log('🃏 Дилер: вскриваємо карти', 'h')
-        prev = 0
+            for p in al:
+                p.show = True; p.ev, p.b5 = best_cards(p.hand + s.board)
+                await s.log(f'{p.name}: {" ".join(map(card_str, p.hand))} — {hand_name(p.ev)}')
         for L in sorted({p.total for p in s.P if p.total > 0}):
-            amt = sum(min(p.total, L) - min(p.total, prev) for p in s.P); prev = L
-            el = [p for p in al if p.total >= L] or al; w = el
+            amt = sum(min(p.total, L) - min(p.total, prev) for p in s.P)
+            el = [p for p in al if p.total >= L] or al
+            if multi and len(el) == 1 and amt == min(el[0].total, L) - min(el[0].total, prev):
+                i = s.P.index(el[0]); back[i] = back.get(i, 0) + amt; prev = L; continue   # неподілена ставка повертається
+            prev = L; w = el
             if multi: m = max(p.ev for p in el); w = [p for p in el if p.ev == m]
+            w = sorted(w, key=lambda p: (s.P.index(p) - s.btn - 1) % n)      # зайва фішка — першому ліворуч від дилера
             sh = amt // len(w)
             for p in w: won[s.P.index(p)] = won.get(s.P.index(p), 0) + sh
             won[s.P.index(w[0])] += amt - sh * len(w)
+        for i, a in back.items():
+            s.P[i].chips += a; await s.log(f'{s.P[i].name}: повернено неподілену ставку {a}')
         for i, a in won.items():
             p = s.P[i]; p.chips += a; p.win = True
-            await s.log(f'{p.name} виграє {a}' + (f' ({HN[p.ev[0]]})' if multi else ' — усі спасували'), 'w')
+            await s.log(f'{p.name} виграє {a}' + (f' ({hand_name(p.ev)})' if multi else ' — усі спасували'), 'w')
         s.turn = -1; await s.sync()
     async def run(s):
         try:
